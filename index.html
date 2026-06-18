@@ -469,24 +469,47 @@ function highlight(code) {
 
 // ── Loading SVGs ───────────────────────────────────────────────────────────
 async function tryAutoLoad() {
-  // Try to fetch a directory listing from ./SVGs/
   el.emptyState.style.display = 'none';
   el.loadState.style.display = 'flex';
+
+  // GitHub Pages has no directory listing, so we read SVGs/manifest.json
+  // which is a simple JSON array of filenames: ["file1.svg","file2.svg",...]
   try {
-    // Approach 1: fetch index from ./SVGs/
-    const res = await fetch('./SVGs/');
-    if (!res.ok) throw new Error('no index');
-    const html = await res.text();
-    // parse hrefs from directory listing
-    const links = [...html.matchAll(/href="([^"]+\.svg)"/gi)].map(m => m[1]);
-    const svgLinks = links.filter(l => l.toLowerCase().endsWith('.svg') && !l.startsWith('http'));
-    if (svgLinks.length === 0) throw new Error('no svgs found in listing');
-    const names = svgLinks.map(l => l.replace(/.*\//, ''));
-    await loadFromURLs(svgLinks.map((l, i) => ({ name: names[i], url: './SVGs/' + names[i] })));
-  } catch {
-    el.loadState.style.display = 'none';
-    el.emptyState.style.display = 'flex';
+    const res = await fetch('./SVGs/manifest.json?_=' + Date.now());
+    if (!res.ok) throw new Error('no manifest');
+    const names = await res.json();
+    if (!Array.isArray(names) || names.length === 0) throw new Error('empty manifest');
+    const svgNames = names.filter(n => typeof n === 'string' && n.toLowerCase().endsWith('.svg'));
+    if (svgNames.length === 0) throw new Error('no svgs in manifest');
+    await loadFromURLs(svgNames.map(name => ({ name, url: './SVGs/' + encodeURIComponent(name) })));
+    return;
+  } catch (e) {
+    // manifest missing or invalid — fall through
   }
+
+  // Fallback: try a plain directory listing (works on some servers, not GitHub Pages)
+  try {
+    const res = await fetch('./SVGs/');
+    if (!res.ok) throw new Error('no listing');
+    const html = await res.text();
+    const links = [...html.matchAll(/href="([^"?#]+\.svg)"/gi)].map(m => m[1]);
+    const svgLinks = links.filter(l => !l.startsWith('http'));
+    if (svgLinks.length === 0) throw new Error('no svgs in listing');
+    const names = svgLinks.map(l => l.replace(/.*\//, ''));
+    await loadFromURLs(names.map(name => ({ name, url: './SVGs/' + encodeURIComponent(name) })));
+    return;
+  } catch {}
+
+  // Nothing worked — show the empty state with instructions
+  el.loadState.style.display = 'none';
+  el.emptyState.style.display = 'flex';
+  el.emptyState.querySelector('h3').textContent = 'Add a manifest to auto-load';
+  el.emptyState.querySelector('p').innerHTML =
+    'GitHub Pages needs a <code style="color:var(--accent)">SVGs/manifest.json</code> file.<br>' +
+    'Create it with the filenames of your SVGs:<br>' +
+    '<code style="color:var(--accent);font-size:11px;display:block;margin-top:6px">' +
+    '["file1.svg", "file2.svg", "file3.svg"]</code><br>' +
+    'Or use <strong>Load Folder</strong> / drag &amp; drop to browse manually.';
 }
 
 async function loadFromURLs(items) {
